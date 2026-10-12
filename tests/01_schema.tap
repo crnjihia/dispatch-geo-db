@@ -1,0 +1,7 @@
+1..6
+ok 1 - Table riders exists
+ok 2 - GiST index idx_riders_location_gist exists
+ok 3 - Table zones exists
+ok 4 - Table rider_pings exists
+ok 5 - Table zone_events exists
+ok 6 - Trigger rider_geofence_trigger exists
