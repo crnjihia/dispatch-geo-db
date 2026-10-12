@@ -17,6 +17,9 @@ docker compose up -d
 | 2024‑10‑13 | 02_create_zones.sql | Create `zones` table with `GEOMETRY(Polygon, 4326)` |
 | 2024‑10‑13 | 03_create_geofence_trigger.sql | Add geofence trigger using `ST_Within` |
 | 2024‑10‑13 | 04_create_heatmap_mv.sql | Add heatmap materialized view for ping density |
+| 2024‑10‑13 | 05_create_rider_pings.sql | Add `rider_pings` table for location pings |
+| 2024‑10‑13 | 06_create_zone_events.sql | Add `zone_events` table for geofence events |
+| 2024‑10‑13 | 07_create_ways.sql | Add placeholder `ways` table for pgRouting network |
 
 ## KNN Nearest‑Neighbour Query
 ```sql
@@ -73,5 +76,81 @@ echo "Running pgTap tests…"
 psql -U example -d dispatch_geo_db -f benchmarks/knn_benchmark.sql
 ```
 
+## Additional Tables
+
+### rider_pings
+```sql
+-- Table to store rider location pings used by the geofence trigger and heatmap MV.
+CREATE TABLE IF NOT EXISTS rider_pings (
+    id SERIAL PRIMARY KEY,
+    rider_id INT NOT NULL REFERENCES riders(id) ON DELETE CASCADE,
+    ping_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    location GEOMETRY(Point, 4326) NOT NULL
+);
+```
+
+### zone_events
+```sql
+-- Table that logs entry/exit events produced by the geofence trigger.
+CREATE TABLE IF NOT EXISTS zone_events (
+    id SERIAL PRIMARY KEY,
+    rider_id INT NOT NULL REFERENCES riders(id) ON DELETE CASCADE,
+    zone_id INT NOT NULL REFERENCES zones(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL CHECK (event_type IN ('enter','exit')),
+    event_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+### ways (pgRouting network)
+```sql
+-- Placeholder for pgRouting network data. Populate with osm2pgrouting.
+CREATE TABLE IF NOT EXISTS ways (
+    id SERIAL PRIMARY KEY,
+    source BIGINT,
+    target BIGINT,
+    cost DOUBLE PRECISION,
+    reverse_cost DOUBLE PRECISION,
+    geom GEOMETRY(LineString, 4326)
+);
+```
+
+## Loading OSM Data for pgRouting
+
+1. Install `osm2pgrouting` locally (or use a container that provides it).
+2. Place a Nairobi OSM extract (`nairobi.osm.pbf`) in the `data/` directory.
+3. Run the import (example using a temporary container):
+   ```sh
+   docker run --rm -v "$(pwd)/data:/data" \
+       -e PGPASSWORD=example \
+       --network host \
+       pgrouting/pgrouting \
+       osm2pgrouting -f /data/nairobi.osm.pbf \
+           -c /usr/share/osm2pgrouting/mapconfig.xml \
+           -d dispatch_geo_db \
+           -U example \
+           -W example \
+           -p 5432 \
+           -i
+   ```
+   The command creates and populates the `ways` table used by the shortest‑path example.
+
+## Running Tests & Benchmarks
+
+- **pgTap tests** (requires pgTap installed in the container). To run:
+  ```sh
+  docker compose exec -T db pg_prove /tests/*.tap
+  ```
+
+- **KNN benchmark** (already in `benchmarks/knn_benchmark.sql`). Run:
+  ```sh
+  docker compose exec -T db psql -U example -d dispatch_geo_db -f /benchmarks/knn_benchmark.sql
+  ```
+
+- **Heatmap refresh**:
+  ```sh
+  docker compose exec -T db psql -U example -d dispatch_geo_db -c "REFRESH MATERIALIZED VIEW CONCURRENTLY heatmap_100m;"
+  ```
+
 ## License
+MIT
 MIT
