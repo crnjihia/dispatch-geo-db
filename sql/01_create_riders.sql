@@ -6,5 +6,6 @@ CREATE TABLE IF NOT EXISTS riders (
     id SERIAL PRIMARY KEY,
     rider_name TEXT NOT NULL,
     location GEOMETRY(Point, 4326) NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT now()
+    created_at TIMESTAMPTZ DEFAULT now();
+CREATE INDEX IF NOT EXISTS idx_riders_location_gist ON riders USING GIST (location);
 );
