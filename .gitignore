@@ -1,5 +1,6 @@
 # Generated data and WAL
-data/
+data/*
+!data/.gitkeep
 *.csv
 pg_wal/
 
