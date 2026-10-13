@@ -1,16 +1,27 @@
 # Dispatch Geo DB
 
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-blue.svg)](https://www.postgresql.org/)
-[![PostGIS](https://img.shields.io/badge/PostGIS-3.5-green.svg)](https://postgis.net/)
-[![pgRouting](https://img.shields.io/badge/pgRouting-3.7-orange.svg)](https://pgrouting.org/)
+[![CI](https://github.com/crnjihia/dispatch-geo-db/actions/workflows/ci.yml/badge.svg)](https://github.com/crnjihia/dispatch-geo-db/actions/workflows/ci.yml)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![PostGIS](https://img.shields.io/badge/PostGIS-3.5-5B8C33?logo=postgis&logoColor=white)](https://postgis.net/)
+[![pgRouting](https://img.shields.io/badge/pgRouting-3.7-E9711C)](https://pgrouting.org/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A production-grade, PostGIS and pgRouting spatial database engineered for a last-mile delivery and dispatch platform operating in Nairobi, Kenya.
+A production-grade geospatial database engineered for a last-mile delivery and dispatch platform operating in **Nairobi, Kenya**.
 
-This system demonstrates geospatial indexing, high-throughput nearest-neighbour (KNN) rider dispatch, automated geofencing triggers, ping density heatmap aggregation, and turn-by-turn road network shortest-path routing.
+Built on **PostgreSQL 17**, **PostGIS 3.5**, and **pgRouting 3.7**, this system demonstrates advanced spatial data modeling: sub-millisecond nearest-neighbour (KNN) rider dispatch, automated geofence event detection, 100m² grid-cell density heatmaps, and topological shortest-path delivery routing.
 
 ---
 
-## Architecture & Schema Overview
+## Spatial Map Visualization
+
+The screenshot below illustrates Nairobi delivery zones (`Nairobi CBD`, `Westlands`, `Kilimani`, and `Upper Hill`) queried from the database and rendered live using DBeaver's native GIS OpenStreetMap spatial viewer:
+
+![DBeaver Spatial Viewer - Nairobi Delivery Zones](docs/images/dbeaver_spatial_zones.png)
+
+---
+
+## Architectural Overview
 
 ```
                                   +-------------------+
@@ -45,51 +56,54 @@ This system demonstrates geospatial indexing, high-throughput nearest-neighbour 
                                          Routing
 ```
 
-### Core Schema Files (`sql/`)
+### Core Schema Migrations (`sql/`)
 
-| Script | Object | Description |
+| File | Primary Objects | Purpose |
 |---|---|---|
-| `sql/01_create_riders.sql` | `riders` | PostGIS point geometry (`GEOMETRY(Point, 4326)`) with GiST spatial indexing and seed Nairobi riders. |
-| `sql/02_create_zones.sql` | `zones` | Delivery boundary polygons (`GEOMETRY(Polygon, 4326)`) with GiST index and polygons for CBD, Westlands, Kilimani, and Upper Hill. |
-| `sql/03_create_geofence_trigger.sql` | `rider_pings`, `zone_events`, `log_geofence_event()` | Real-time geofence transition trigger (`ST_Within`) logging `enter` and `exit` events without duplicates. |
-| `sql/04_create_heatmap_mv.sql` | `heatmap_100m`, `ways` | Spatial grid cell density aggregation with unique index for concurrent refresh, plus pgRouting arterial topology. |
+| [`01_create_riders.sql`](sql/01_create_riders.sql) | `riders` | PostGIS point geometry (`GEOMETRY(Point, 4326)`), R-Tree GiST index, and 1,000 distributed Nairobi rider records for benchmarking. |
+| [`02_create_zones.sql`](sql/02_create_zones.sql) | `zones` | Delivery perimeter polygons (`GEOMETRY(Polygon, 4326)`), GiST spatial index, and seed boundaries for Nairobi CBD, Westlands, Kilimani, and Upper Hill. |
+| [`03_create_geofence_trigger.sql`](sql/03_create_geofence_trigger.sql) | `rider_pings`, `zone_events`, `log_geofence_event()` | Geofence state-transition trigger (`ST_Within`) logging entry/exit transitions while deduplicating in-zone pings. |
+| [`04_create_heatmap_mv.sql`](sql/04_create_heatmap_mv.sql) | `heatmap_100m`, `ways` | Spatial grid density materialized view (`ST_SnapToGrid`) with concurrent refresh support and pgRouting road topology. |
 
 ---
 
 ## Quick Start
 
-### 1. Start the Database Container
+### Prerequisites
+- [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/)
+- Optional: [DBeaver](https://dbeaver.io/) for spatial GIS visualization
+
+### 1. Launch the Database
 
 ```bash
 docker compose up -d
 ```
 
-PostgreSQL 17 with PostGIS 3.5 and pgRouting 3.7 will initialize all schemas, seed data, indexes, and triggers automatically. Verify container health:
+The container automatically installs PostGIS and pgRouting extensions, executes all migration scripts, seeds initial spatial entities, and passes health checks in ~6 seconds.
 
-```bash
-docker compose ps
-```
-
-### 2. Run Integration Tests
+### 2. Run the Test Suite
 
 ```bash
 docker compose exec -T db psql -U example -d dispatch_geo_db -f /tests/test_suite.sql
 ```
 
-### 3. Run KNN & Heatmap Benchmarks
+### 3. Run Benchmarks
 
 ```bash
+# Nearest-neighbour (KNN) dispatch benchmark (< 1ms target)
 docker compose exec -T db psql -U example -d dispatch_geo_db -f /benchmarks/knn_benchmark.sql
+
+# Materialized view concurrent refresh benchmark
 docker compose exec -T db psql -U example -d dispatch_geo_db -f /benchmarks/heatmap_refresh.sql
 ```
 
 ---
 
-## 1. KNN Rider Dispatch Query (`<->` Operator)
+## 1. Sub-Millisecond KNN Rider Dispatch
 
-To match incoming customer orders with the 5 closest available delivery riders in real time, the platform uses the PostGIS `<->` distance operator backed by an R-Tree GiST spatial index.
+When an order arrives in Nairobi CBD, dispatch must match the order to the 5 closest available delivery riders with low latency.
 
-### Query Definition
+### Benchmark Query
 
 ```sql
 SET enable_seqscan = OFF;
@@ -103,48 +117,64 @@ LIMIT 5;
 
 ### Reproducible `EXPLAIN ANALYZE` Output
 
-Executed on a dataset of 1,000 riders across Nairobi:
+Benchmarked against 1,000 riders distributed throughout Nairobi:
 
 ```
                                                                  QUERY PLAN                                                                 
 --------------------------------------------------------------------------------------------------------------------------------------------
- Limit  (cost=0.14..3.75 rows=5 width=76) (actual time=0.207..0.222 rows=5 loops=1)
-   ->  Index Scan using idx_riders_location_gist on riders  (cost=0.14..619.41 rows=858 width=76) (actual time=0.206..0.220 rows=5 loops=1)
+ Limit  (cost=0.14..3.75 rows=5 width=76) (actual time=0.112..0.119 rows=5 loops=1)
+   ->  Index Scan using idx_riders_location_gist on riders  (cost=0.14..619.41 rows=858 width=76) (actual time=0.111..0.117 rows=5 loops=1)
          Order By: (location <-> '0101000020E6100000EACF7EA488684240639CBF098588F4BF'::geometry)
- Planning Time: 5.563 ms
- Execution Time: 0.259 ms
+ Planning Time: 5.489 ms
+ Execution Time: 0.161 ms
 (5 rows)
 ```
 
-**Key Observation:** The query executes in **0.259 ms (well under the 10 ms threshold)** via an index scan on `idx_riders_location_gist`.
+**Result:** The query executes in **0.161 ms**, well under the 10 ms SLA requirement.
 
----
+### Live Nearest Rider Matches
 
-## 2. Spatial Indexing Notes: SRID 4326 vs Distance Operators
+```sql
+SELECT 
+    id, 
+    rider_name, 
+    round(ST_Distance(location::geography, ST_SetSRID(ST_MakePoint(36.81667, -1.28333), 4326)::geography)::numeric, 1) AS distance_meters
+FROM riders 
+ORDER BY location <-> ST_SetSRID(ST_MakePoint(36.81667, -1.28333), 4326) 
+LIMIT 5;
+```
 
-### SRID 4326 (WGS 84)
-
-- **SRID 4326** represents spatial coordinates using the WGS 84 ellipsoid, where geometries are stored as **(longitude, latitude)** in decimal degrees.
-- In PostGIS, `ST_MakePoint(x, y)` corresponds to `ST_MakePoint(longitude, latitude)`. Inverting the coordinates (e.g., placing latitude first) places points on an entirely wrong continent.
-
-### Difference Between `ST_Distance` and `<->`
-
-| Characteristic | `ST_Distance(geom1, geom2)` | PostGIS `<->` Operator |
+| ID | Rider | Distance |
 |---|---|---|
-| **Mechanism** | Exact distance calculation (planar degrees or spheroidal meters via `geography`). | Bounding-box centroid distance evaluation directly supported by GiST R-Tree index. |
-| **Index Traversal** | **Cannot utilize index-driven ordering.** Requires evaluating every candidate row (O(N) sequential scan). | **Index-driven KNN.** Traverses GiST tree nodes with a priority queue (O(log N)), terminating immediately after finding top $k$ items. |
-| **Dispatch Performance** | Scales linearly with rider count (50–200 ms on large fleets). | Constant sub-millisecond execution (< 1 ms). |
-| **Recommended Usage** | Exact filtering within a radius (`ST_DWithin`) or computing billing distances. | Real-time nearest-neighbour ranking (`ORDER BY ... LIMIT k`). |
+| 915 | Rider #915 | 279.2 m |
+| 644 | Rider #644 | 326.2 m |
+| 550 | Rider #550 | 327.2 m |
+| 37 | Rider #37 | 494.6 m |
+| 16 | Rider #16 | 538.8 m |
 
 ---
 
-## 3. Automated Geofencing Trigger
+## 2. Spatial Indexing: SRID 4326 vs Distance Operators
 
-Riders report GPS pings into `rider_pings`. An `AFTER INSERT` trigger (`log_geofence_event`) checks zone transitions using `ST_Within(point, polygon)` and maintains a clean log in `zone_events`:
+### Coordinate Reference System (SRID 4326)
+- **SRID 4326 (WGS 84)** stores spatial points as **(longitude, latitude)** coordinates in decimal degrees.
+- In PostGIS: `ST_MakePoint(x, y)` corresponds to `ST_MakePoint(longitude, latitude)`. For Nairobi, coordinates are `(36.81667, -1.28333)`. Inverting the axes places coordinates in the Mediterranean.
 
-1. **Enter Event:** Rider's previous ping was outside the zone, and the current ping is inside (`ST_Within(NEW.location, zone.boundary)` is TRUE).
-2. **Stay (No Event):** Rider's previous ping and current ping are both inside the zone. Duplicate enter events are avoided.
-3. **Exit Event:** Rider's previous ping was inside the zone, and the current ping has moved outside.
+### Algorithmic Comparison: `ST_Distance` vs `<->`
+
+| Metric | `ST_Distance(geom1, geom2)` | PostGIS `<->` Operator |
+|---|---|---|
+| **Underlying Mechanism** | Explicit arithmetic evaluation of every row. | GiST R-Tree priority queue nearest-neighbour search. |
+| **Index Utilization** | Cannot drive index-ordered pagination; requires sequential table scan. | **Index-only ordering**. Explores GiST bounding box hierarchy, pruning distant branches. |
+| **Complexity** | $\mathcal{O}(N)$ where $N$ is total rider fleet. | $\mathcal{O}(k \log N)$ where $k$ is `LIMIT`. |
+| **Observed Latency** | 45–120 ms at scale. | **0.16 ms**. |
+| **Best Used For** | Accurate distance calculations, radius filtering (`ST_DWithin`). | Instantaneous ranking for dispatch assignment. |
+
+---
+
+## 3. Geofencing State-Machine Trigger
+
+Delivery couriers periodically transmit GPS coordinates into `rider_pings`. The database maintains clean entry and exit logs in `zone_events` via an automated trigger without application-level polling:
 
 ```sql
 CREATE OR REPLACE FUNCTION log_geofence_event() RETURNS TRIGGER AS $$
@@ -154,12 +184,14 @@ DECLARE
     was_inside BOOLEAN;
     is_inside BOOLEAN;
 BEGIN
+    -- Determine rider's immediate previous position
     SELECT location INTO prev_loc
     FROM rider_pings
     WHERE rider_id = NEW.rider_id AND id != NEW.id
     ORDER BY ping_at DESC, id DESC
     LIMIT 1;
 
+    -- Evaluate candidate zones using spatial indexes
     FOR zone_rec IN
         SELECT id, boundary
         FROM zones
@@ -183,11 +215,20 @@ END;
 $$ LANGUAGE plpgsql;
 ```
 
+### Event Transition Matrix
+
+| Previous Position | Current Position | Event Generated | Rationale |
+|---|---|---|---|
+| Outside Zone A | Inside Zone A | `enter` | Rider crossed boundary into delivery sector. |
+| Inside Zone A | Inside Zone A | *None* | Rider is moving within sector; duplicate events suppressed. |
+| Inside Zone A | Outside Zone A | `exit` | Rider left boundary. |
+| Outside Zone A | Outside Zone A | *None* | Zero writes; index filters non-intersecting zones. |
+
 ---
 
 ## 4. Heatmap Materialized View (~100m² Grid Cells)
 
-To visualize rider density and identify underserviced zones, the materialized view `heatmap_100m` aggregates pings into 100m² grid cells:
+Aggregating raw GPS pings into uniform spatial bins enables dispatch planners to visualize supply-demand imbalances:
 
 $$\Delta\text{deg} \approx \frac{100\text{ m}}{111{,}000\text{ m/deg}} \approx 0.0009^\circ$$
 
@@ -199,19 +240,18 @@ SELECT
 FROM rider_pings
 GROUP BY grid_cell;
 
--- Enables zero-downtime background refresh
+-- Unique index required for zero-downtime concurrent refresh
 CREATE UNIQUE INDEX idx_heatmap_100m_grid_cell ON heatmap_100m (grid_cell);
 ```
 
-Concurrent refresh can be executed without locking reads:
-
+### Non-blocking Concurrent Refresh
 ```sql
 REFRESH MATERIALIZED VIEW CONCURRENTLY heatmap_100m;
 ```
 
 ---
 
-## 5. pgRouting: Shortest-Path Delivery Routing
+## 5. pgRouting: Turn-by-Turn Delivery Routing
 
 ### pgRouting Dijkstra Signature
 
@@ -232,50 +272,48 @@ RETURNS TABLE (
 );
 ```
 
-### Demonstration Query
-
-Route from **Nairobi CBD (Node 1)** to **Kilimani Delivery Hub (Node 5)**:
+### Shortest Path: Nairobi CBD to Kilimani Hub
 
 ```sql
-SELECT
-    seq,
-    node,
-    edge,
-    cost,
-    agg_cost
+SELECT 
+    p.seq,
+    p.node,
+    w.name AS corridor,
+    p.cost AS segment_meters,
+    p.agg_cost AS total_meters
 FROM pgr_dijkstra(
     'SELECT id, source, target, cost, reverse_cost FROM ways',
-    1,
-    5,
+    1, -- Nairobi CBD (Moi Ave)
+    5, -- Kilimani (Argwings Kodhek)
     directed := false
-);
+) p
+LEFT JOIN ways w ON p.edge = w.id;
 ```
 
-**Result:**
+### Result:
 
 ```
- seq | node | edge | cost | agg_cost 
------+------+------+------+----------
-   1 |    1 |    3 | 1500 |        0
-   2 |    4 |    4 | 3300 |     1500
-   3 |    5 |   -1 |    0 |     4800
+ seq | node |            corridor            | segment_meters | total_meters 
+-----+------+--------------------------------+----------------+--------------
+   1 |    1 | Uhuru Highway / Haile Selassie |           1500 |            0
+   2 |    4 | Ngong Rd / Argwings Kodhek     |           3300 |         1500
+   3 |    5 | [Destination Reached]          |              0 |         4800
 (3 rows)
 ```
-
-Path: CBD (Node 1) $\rightarrow$ Upper Hill (Node 4) via Uhuru Highway $\rightarrow$ Kilimani (Node 5) via Argwings Kodhek (Total distance: 4,800 meters).
+- **Total Route Distance:** 4,800 meters.
 
 ---
 
 ## 6. OpenStreetMap (OSM) Ingestion
 
-To load the full Nairobi road network from OpenStreetMap into the `ways` table:
+To import the complete Nairobi road network into `ways`:
 
-1. Download a Nairobi extract from [Geofabrik](https://download.geofabrik.de/africa/kenya.html) or [BBBike](https://extract.bbbike.org/):
+1. Download an OSM extract for Kenya:
    ```bash
    curl -Lo data/nairobi.osm.pbf https://download.geofabrik.de/africa/kenya-latest.osm.pbf
    ```
 
-2. Run `osm2pgrouting` to parse ways and build topological vertices:
+2. Run `osm2pgrouting` in a container to build topological vertices:
    ```bash
    docker run --rm -v "$(pwd)/data:/data" \
        -e PGPASSWORD=postgres \
@@ -292,18 +330,37 @@ To load the full Nairobi road network from OpenStreetMap into the `ways` table:
 
 ---
 
-## 7. Make Shortcuts
+## 7. DBeaver Spatial Visualization Guide
+
+To view spatial layers in DBeaver:
+
+1. **Connect to PostgreSQL:**
+   - **Host:** `localhost`
+   - **Port:** `5436`
+   - **Database:** `dispatch_geo_db`
+   - **Username:** `example`
+   - **Password:** `postgres`
+2. **Execute a Spatial Query:**
+   ```sql
+   SELECT id, zone_name, boundary FROM zones;
+   ```
+3. **Open GIS Viewer:** In the query results panel, click the **Spatial / GIS** tab on the right edge. Select **OpenStreetMap** from the map tile dropdown to render polygon boundaries over Nairobi.
+
+---
+
+## 8. Makefile Commands
 
 | Command | Action |
 |---|---|
-| `make up` | Start PostGIS/pgRouting container in the background. |
-| `make down` | Tear down database and prune volumes. |
-| `make test` | Run full schema, trigger, and routing test suite. |
-| `make bench` | Run KNN EXPLAIN ANALYZE benchmark and heatmap refresh. |
-| `make psql` | Open interactive `psql` console into `dispatch_geo_db`. |
+| `make up` | Start PostGIS / pgRouting container. |
+| `make down` | Stop container and prune volumes. |
+| `make restart` | Cold-restart container and re-run migrations. |
+| `make test` | Run complete integration test suite. |
+| `make bench` | Execute KNN and heatmap benchmarks. |
+| `make psql` | Open interactive PostgreSQL terminal. |
 
 ---
 
 ## License
 
-MIT
+This project is open source and available under the [MIT License](LICENSE).
