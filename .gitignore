@@ -1,3 +1,8 @@
+# Generated data and WAL
+data/
+*.csv
+pg_wal/
+
 # Docker & environment
 .env
 docker-compose.override.yml

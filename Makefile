@@ -1,17 +1,22 @@
-.PHONY: up down test bench
+.PHONY: up down restart test bench psql logs
 
 up:
 	docker compose up -d
 
 down:
-	docker compose down
+	docker compose down -v
+
+restart: down up
 
 test:
-	# Run pgTap tests (requires pgTap installed)
-	docker compose exec -T db pg_prove /tests/*.tap
+	docker compose exec -T db psql -U example -d dispatch_geo_db -f /tests/test_suite.sql
 
 bench:
-	# KNN benchmark
 	docker compose exec -T db psql -U example -d dispatch_geo_db -f /benchmarks/knn_benchmark.sql
-	# Refresh heatmap materialized view
-	docker compose exec -T db psql -U example -d dispatch_geo_db -c "REFRESH MATERIALIZED VIEW CONCURRENTLY heatmap_100m;"
+	docker compose exec -T db psql -U example -d dispatch_geo_db -f /benchmarks/heatmap_refresh.sql
+
+psql:
+	docker compose exec -it db psql -U example -d dispatch_geo_db
+
+logs:
+	docker compose logs -f db
