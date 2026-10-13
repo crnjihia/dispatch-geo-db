@@ -1,6 +1,6 @@
 # Dispatch Geo DB
 
-[![CI](https://github.com/crnjihia/dispatch-geo-db/actions/workflows/ci.yml/badge.svg)](https://github.com/crnjihia/dispatch-geo-db/actions/workflows/ci.yml)
+[![CI](https://github.com/crnjihia/dispatch-geo-db/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/crnjihia/dispatch-geo-db/actions/workflows/ci.yml)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![PostGIS](https://img.shields.io/badge/PostGIS-3.5-5B8C33?logo=postgis&logoColor=white)](https://postgis.net/)
 [![pgRouting](https://img.shields.io/badge/pgRouting-3.7-E9711C)](https://pgrouting.org/)
